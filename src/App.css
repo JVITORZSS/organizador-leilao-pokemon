@@ -1,0 +1,427 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  background: #08090d;
+  color: #f5f7fa;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app {
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(59, 130, 246, 0.08),
+      transparent 35%
+    ),
+    #08090d;
+}
+
+.header {
+  border-bottom: 1px solid #1d2028;
+  padding: 32px 24px;
+  background: rgba(8, 9, 13, 0.95);
+}
+
+.header > div {
+  max-width: 1100px;
+  margin: auto;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.header p {
+  margin: 7px 0 0;
+  color: #858b99;
+  font-size: 14px;
+}
+
+.container {
+  width: min(1100px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 60px;
+}
+
+.resumo {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.resumo-card {
+  background: #101218;
+  border: 1px solid #20242d;
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.resumo-card span {
+  display: block;
+  color: #858b99;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.resumo-card strong {
+  font-size: 24px;
+}
+
+.resumo-card.destaque {
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(30, 64, 175, 0.12);
+}
+
+.resumo-card.destaque strong {
+  color: #60a5fa;
+}
+
+.acoes-topo {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+
+.btn-adicionar {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: #2563eb;
+  color: white;
+  font-weight: 700;
+  transition: 0.2s;
+}
+
+.btn-adicionar:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.vazio {
+  text-align: center;
+  border: 1px dashed #292e38;
+  border-radius: 18px;
+  padding: 70px 20px;
+  background: #0d0f14;
+}
+
+.vazio-icone {
+  font-size: 46px;
+  margin-bottom: 14px;
+}
+
+.vazio h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+.vazio p {
+  color: #858b99;
+  max-width: 400px;
+  margin: 0 auto 24px;
+  line-height: 1.5;
+}
+
+.lista-pessoas {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pessoa-card {
+  background: #101218;
+  border: 1px solid #20242d;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.pessoa-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-bottom: 1px solid #20242d;
+}
+
+.pessoa-titulo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1d4ed8;
+  font-weight: 800;
+}
+
+.pessoa-titulo input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: white;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.pessoa-titulo input::placeholder {
+  color: #656b78;
+}
+
+.pessoa-total {
+  text-align: right;
+  min-width: 120px;
+}
+
+.pessoa-total span {
+  display: block;
+  font-size: 11px;
+  color: #777e8c;
+  text-transform: uppercase;
+}
+
+.pessoa-total strong {
+  color: #60a5fa;
+  font-size: 18px;
+}
+
+.btn-remover-pessoa {
+  border: 0;
+  background: transparent;
+  color: #777e8c;
+  font-size: 18px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.btn-remover-pessoa:hover {
+  background: #241417;
+  color: #f87171;
+}
+
+.cartas {
+  padding: 18px;
+}
+
+.cartas-titulo {
+  display: grid;
+  grid-template-columns: 1fr 180px 32px;
+  gap: 12px;
+  padding: 0 0 8px;
+  color: #686f7c;
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.carta-linha {
+  display: grid;
+  grid-template-columns: 1fr 180px 32px;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.carta-linha input {
+  width: 100%;
+  border: 1px solid #282d37;
+  background: #0b0d12;
+  color: white;
+  border-radius: 9px;
+  padding: 11px 12px;
+  outline: none;
+}
+
+.carta-linha input:focus {
+  border-color: #2563eb;
+}
+
+.carta-linha input::placeholder {
+  color: #5e6470;
+}
+
+.valor-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid #282d37;
+  background: #0b0d12;
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.valor-input span {
+  padding-left: 12px;
+  color: #6f7683;
+  font-size: 13px;
+}
+
+.valor-input input {
+  border: 0;
+  background: transparent;
+  padding-left: 7px;
+}
+
+.btn-remover-carta {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #666d79;
+  font-size: 24px;
+}
+
+.btn-remover-carta:hover {
+  background: #241417;
+  color: #f87171;
+}
+
+.btn-adicionar-carta {
+  border: 1px dashed #303641;
+  border-radius: 9px;
+  background: transparent;
+  color: #8f97a5;
+  padding: 10px 14px;
+  font-size: 13px;
+  transition: 0.2s;
+}
+
+.btn-adicionar-carta:hover {
+  border-color: #2563eb;
+  color: #60a5fa;
+}
+
+.rodape-total {
+  margin-top: 22px;
+  padding: 20px;
+  border: 1px solid #20242d;
+  border-radius: 16px;
+  background: #101218;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rodape-total span {
+  display: block;
+  color: #777e8c;
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rodape-total strong {
+  font-size: 25px;
+  color: #60a5fa;
+}
+
+.btn-pdf {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 18px;
+  background: #f5f7fa;
+  color: #090a0d;
+  font-weight: 800;
+}
+
+.btn-pdf:hover {
+  background: #dce1e8;
+}
+
+@media (max-width: 700px) {
+  .header {
+    padding: 24px 16px;
+  }
+
+  .header h1 {
+    font-size: 22px;
+  }
+
+  .container {
+    width: min(100% - 20px, 1100px);
+    padding-top: 18px;
+  }
+
+  .resumo {
+    grid-template-columns: 1fr;
+  }
+
+  .acoes-topo {
+    justify-content: stretch;
+  }
+
+  .acoes-topo .btn-adicionar {
+    width: 100%;
+  }
+
+  .pessoa-header {
+    flex-wrap: wrap;
+  }
+
+  .pessoa-titulo {
+    width: calc(100% - 40px);
+  }
+
+  .pessoa-total {
+    margin-left: 50px;
+    text-align: left;
+  }
+
+  .cartas {
+    padding: 14px;
+  }
+
+  .cartas-titulo {
+    display: none;
+  }
+
+  .carta-linha {
+    grid-template-columns: 1fr 42px;
+  }
+
+  .carta-linha > input {
+    grid-column: 1 / -1;
+  }
+
+  .valor-input {
+    grid-column: 1;
+  }
+
+  .rodape-total {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 18px;
+  }
+
+  .btn-pdf {
+    width: 100%;
+  }
+}
