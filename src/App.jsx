@@ -1,85 +1,58 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import jsPDF from "jspdf";
 import "./App.css";
 
 const STORAGE_KEY = "organizador-leilao-pokemon";
-
-function criarCarta() {
-  return {
-    id: crypto.randomUUID(),
-    nome: "",
-    valor: "",
-  };
+const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const criarCarta = () => ({ id: uid(), nome: "", valor: "", comprador: "" });
+const normalizarNome = (nome) => String(nome || "").trim().toLocaleLowerCase("pt-BR");
+const moeda = (valor) => Number(valor || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+function numeroValor(valor) {
+  if (valor === "" || valor == null) return 0;
+  const texto = String(valor).trim().replace(/\s/g, "");
+  const normalizado = texto.includes(",") ? texto.replace(/\./g, "").replace(",", ".") : texto;
+  const n = Number(normalizado);
+  return Number.isFinite(n) ? n : 0;
 }
-
-function criarPessoa() {
-  return {
-    id: crypto.randomUUID(),
-    nome: "",
-    cartas: [criarCarta()],
-  };
+function formatarValorInput(valor) { return valor == null ? "" : String(valor); }
+function carregarCartas() {
+  try {
+    const dados = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (!Array.isArray(dados) || !dados.length) return [criarCarta()];
+    // Compatibilidade com a versão antiga, que guardava cartas dentro de cada pessoa.
+    if (dados[0]?.cartas && Array.isArray(dados[0].cartas)) {
+      const cartas = [];
+      dados.forEach((pessoa) => (pessoa.cartas || []).forEach((carta) => cartas.push({
+        id: carta.id || uid(), nome: carta.nome || "", valor: carta.valor ?? "", comprador: pessoa.nome || "",
+      })));
+      return cartas.length ? cartas : [criarCarta()];
+    }
+    return dados.map((c) => ({ id: c.id || uid(), nome: c.nome || "", valor: c.valor ?? "", comprador: c.comprador || c.arrematante || "" }));
+  } catch { return [criarCarta()]; }
 }
-
-function normalizarValor(valor) {
-  if (valor === "" || valor === null || valor === undefined) {
-    return 0;
-  }
-
-  const numero = Number(
-    String(valor)
-      .replace(/\./g, "")
-      .replace(",", ".")
-  );
-
-  return Number.isNaN(numero) ? 0 : numero;
-}
-
-function formatarMoeda(valor) {
-  return Number(valor || 0).toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
-
-function formatarValorInput(valor) {
-  if (valor === "" || valor === null || valor === undefined) {
-    return "";
-  }
-
-  return String(valor);
-}
-
 function desenharPokebola(pdf, x, y, raio = 7) {
   const escala = 4;
   const tamanho = Math.ceil(raio * 2 * escala + 8 * escala);
-
   const canvas = document.createElement("canvas");
   canvas.width = tamanho;
   canvas.height = tamanho;
-
   const ctx = canvas.getContext("2d");
-
   if (!ctx) return;
-
   const centro = tamanho / 2;
   const r = raio * escala;
-
   ctx.clearRect(0, 0, tamanho, tamanho);
-
   // Parte vermelha
   ctx.beginPath();
   ctx.arc(centro, centro, r, Math.PI, 0);
   ctx.closePath();
   ctx.fillStyle = "#ef4444";
   ctx.fill();
-
   // Parte branca
   ctx.beginPath();
   ctx.arc(centro, centro, r, 0, Math.PI);
   ctx.closePath();
   ctx.fillStyle = "#ffffff";
   ctx.fill();
-
   // Linha central
   ctx.beginPath();
   ctx.moveTo(centro - r, centro);
@@ -87,1258 +60,281 @@ function desenharPokebola(pdf, x, y, raio = 7) {
   ctx.strokeStyle = "#111827";
   ctx.lineWidth = 1.5 * escala;
   ctx.stroke();
-
   // Círculo central
   ctx.beginPath();
   ctx.arc(centro, centro, r * 0.27, 0, Math.PI * 2);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
-
   ctx.beginPath();
   ctx.arc(centro, centro, r * 0.27, 0, Math.PI * 2);
   ctx.strokeStyle = "#111827";
   ctx.lineWidth = 1.5 * escala;
   ctx.stroke();
-
   // Contorno
   ctx.beginPath();
   ctx.arc(centro, centro, r, 0, Math.PI * 2);
   ctx.strokeStyle = "#111827";
   ctx.lineWidth = 1.5 * escala;
   ctx.stroke();
-
   const imagem = canvas.toDataURL("image/png");
-
-  pdf.addImage(
-    imagem,
-    "PNG",
-    x - raio,
-    y - raio,
-    raio * 2,
-    raio * 2
-  );
+  pdf.addImage(imagem, "PNG", x - raio, y - raio, raio * 2, raio * 2);
 }
 
 function App() {
-  const [pessoas, setPessoas] = useState(() => {
-    try {
-      const salvo = localStorage.getItem(STORAGE_KEY);
-
-      if (!salvo) {
-        return [criarPessoa()];
-      }
-
-      const dados = JSON.parse(salvo);
-
-      if (!Array.isArray(dados) || dados.length === 0) {
-        return [criarPessoa()];
-      }
-
-      return dados;
-    } catch {
-      return [criarPessoa()];
-    }
-  });
-
+  const [cartas, setCartas] = useState(carregarCartas);
   const [busca, setBusca] = useState("");
-  const [ordenacao, setOrdenacao] = useState("az");
+  const [ordenacao, setOrdenacao] = useState("entrada");
   const [salvo, setSalvo] = useState(true);
+  const [sugestaoAberta, setSugestaoAberta] = useState(null);
+  const nomeRefs = useRef({});
+  const valorRefs = useRef({});
+  const compradorRefs = useRef({});
 
-  const pessoaNomeRefs = useRef({});
-  const cartaNomeRefs = useRef({});
-  const cartaValorRefs = useRef({});
+  const compradores = useMemo(() => {
+    const porNome = new Map();
+    let proximo = 1;
+    cartas.forEach((carta) => {
+      const nome = String(carta.comprador || "").trim();
+      const chave = normalizarNome(nome);
+      if (!chave || /^\d+$/.test(nome)) return;
+      if (!porNome.has(chave)) porNome.set(chave, { token: proximo++, nome, total: 0, quantidade: 0 });
+      const comprador = porNome.get(chave);
+      comprador.total += numeroValor(carta.valor);
+      if (carta.nome.trim() || carta.valor !== "") comprador.quantidade++;
+    });
+    return [...porNome.values()];
+  }, [cartas]);
+  const tokenPorNome = useMemo(() => new Map(compradores.map((c) => [normalizarNome(c.nome), c.token])), [compradores]);
+  const compradorPorToken = useMemo(() => new Map(compradores.map((c) => [String(c.token), c.nome])), [compradores]);
+  const obterToken = (nome) => {
+    const texto = String(nome || "").trim();
+    if (/^\d+$/.test(texto)) return Number(texto);
+    return tokenPorNome.get(normalizarNome(texto)) || null;
+  };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(pessoas));
-      setSalvo(true);
-    } catch {
-      setSalvo(false);
-    }
-  }, [pessoas]);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(cartas)); setSalvo(true); }
+    catch { setSalvo(false); }
+  }, [cartas]);
 
-  function adicionarPessoa() {
-    const novaPessoa = criarPessoa();
-
-    setPessoas((atual) => [...atual, novaPessoa]);
-
-    setTimeout(() => {
-      pessoaNomeRefs.current[novaPessoa.id]?.focus();
-    }, 50);
-  }
-
-  function removerPessoa(pessoaId) {
-    const pessoa = pessoas.find((item) => item.id === pessoaId);
-
-    if (!pessoa) return;
-
-    const confirmou = window.confirm(
-      `Deseja realmente remover "${pessoa.nome || "esta pessoa"}"?`
-    );
-
-    if (!confirmou) return;
-
-    setPessoas((atual) =>
-      atual.filter((item) => item.id !== pessoaId)
-    );
-  }
-
-  function atualizarNomePessoa(pessoaId, nome) {
-    setPessoas((atual) =>
-      atual.map((pessoa) =>
-        pessoa.id === pessoaId
-          ? {
-              ...pessoa,
-              nome,
-            }
-          : pessoa
-      )
-    );
-  }
-
-  function adicionarCarta(pessoaId) {
-    const novaCarta = criarCarta();
-
-    setPessoas((atual) =>
-      atual.map((pessoa) =>
-        pessoa.id === pessoaId
-          ? {
-              ...pessoa,
-              cartas: [...pessoa.cartas, novaCarta],
-            }
-          : pessoa
-      )
-    );
-
-    setTimeout(() => {
-      cartaNomeRefs.current[novaCarta.id]?.focus();
-    }, 50);
-  }
-
-  function removerCarta(pessoaId, cartaId) {
-    setPessoas((atual) =>
-      atual.map((pessoa) => {
-        if (pessoa.id !== pessoaId) {
-          return pessoa;
-        }
-
-        if (pessoa.cartas.length === 1) {
-          return pessoa;
-        }
-
-        return {
-          ...pessoa,
-          cartas: pessoa.cartas.filter(
-            (carta) => carta.id !== cartaId
-          ),
-        };
-      })
-    );
-  }
-
-  function atualizarNomeCarta(pessoaId, cartaId, nome) {
-    setPessoas((atual) =>
-      atual.map((pessoa) =>
-        pessoa.id !== pessoaId
-          ? pessoa
-          : {
-              ...pessoa,
-              cartas: pessoa.cartas.map((carta) =>
-                carta.id === cartaId
-                  ? {
-                      ...carta,
-                      nome,
-                    }
-                  : carta
-              ),
-            }
-      )
-    );
-  }
-
-  function atualizarValorCarta(pessoaId, cartaId, valor) {
+  function atualizarCarta(id, campo, valor) {
     let novoValor = valor;
-
-    novoValor = novoValor.replace(/[^\d,.]/g, "");
-
-    novoValor = novoValor.replace(/\./g, ",");
-
-    const partes = novoValor.split(",");
-
-    if (partes.length > 2) {
-      novoValor =
-        partes[0] +
-        "," +
-        partes.slice(1).join("");
+    if (campo === "valor") {
+      novoValor = String(valor).replace(/[^\d,.]/g, "").replace(/\./g, ",");
+      const partes = novoValor.split(",");
+      if (partes.length > 2) novoValor = `${partes[0]},${partes.slice(1).join("")}`;
+      if (partes[1]?.length > 2) novoValor = `${partes[0]},${partes[1].slice(0, 2)}`;
     }
-
-    if (novoValor.includes(",")) {
-      const [inteiro, decimal] = novoValor.split(",");
-
-      novoValor =
-        inteiro +
-        "," +
-        decimal.slice(0, 2);
+    if (campo === "comprador") {
+      const trimmed = String(valor).trim();
+      if (/^\d+$/.test(trimmed) && compradorPorToken.has(trimmed)) novoValor = compradorPorToken.get(trimmed);
     }
-
-    setPessoas((atual) =>
-      atual.map((pessoa) =>
-        pessoa.id !== pessoaId
-          ? pessoa
-          : {
-              ...pessoa,
-              cartas: pessoa.cartas.map((carta) =>
-                carta.id === cartaId
-                  ? {
-                      ...carta,
-                      valor: novoValor,
-                    }
-                  : carta
-              ),
-            }
-      )
-    );
+    setCartas((atual) => atual.map((c) => c.id === id ? { ...c, [campo]: novoValor } : c));
   }
-
-  function calcularTotalPessoa(pessoa) {
-    return pessoa.cartas.reduce(
-      (total, carta) =>
-        total + normalizarValor(carta.valor),
-      0
-    );
+  function adicionarCarta() {
+    const nova = criarCarta();
+    setCartas((atual) => [...atual, nova]);
+    setTimeout(() => nomeRefs.current[nova.id]?.focus(), 50);
   }
-
-  const totalGeral = pessoas.reduce(
-    (total, pessoa) =>
-      total + calcularTotalPessoa(pessoa),
-    0
-  );
-
-  const totalCartas = pessoas.reduce(
-    (total, pessoa) =>
-      total + pessoa.cartas.length,
-    0
-  );
-
-  const maiorDivida =
-    pessoas.length > 0
-      ? pessoas.reduce((maior, pessoa) => {
-          const valorAtual = calcularTotalPessoa(pessoa);
-          const valorMaior = calcularTotalPessoa(maior);
-
-          return valorAtual > valorMaior
-            ? pessoa
-            : maior;
-        }, pessoas[0])
-      : null;
-
-  function obterPessoasOrdenadas() {
-    const termo = busca.trim().toLowerCase();
-
-    let resultado = pessoas.filter((pessoa) => {
-      if (!termo) return true;
-
-      return pessoa.nome
-        .toLowerCase()
-        .includes(termo);
-    });
-
-    resultado = [...resultado];
-
-    if (ordenacao === "az") {
-      resultado.sort((a, b) =>
-        (a.nome || "Sem nome").localeCompare(
-          b.nome || "Sem nome",
-          "pt-BR"
-        )
-      );
-    }
-
-    if (ordenacao === "za") {
-      resultado.sort((a, b) =>
-        (b.nome || "Sem nome").localeCompare(
-          a.nome || "Sem nome",
-          "pt-BR"
-        )
-      );
-    }
-
-    if (ordenacao === "maior") {
-      resultado.sort(
-        (a, b) =>
-          calcularTotalPessoa(b) -
-          calcularTotalPessoa(a)
-      );
-    }
-
-    if (ordenacao === "menor") {
-      resultado.sort(
-        (a, b) =>
-          calcularTotalPessoa(a) -
-          calcularTotalPessoa(b)
-      );
-    }
-
-    return resultado;
+  function removerCarta(id) {
+    if (cartas.length === 1) { setCartas([criarCarta()]); return; }
+    setCartas((atual) => atual.filter((c) => c.id !== id));
   }
-
-  function handleEnterPessoa(event, pessoa) {
-    if (event.key !== "Enter") return;
-
-    event.preventDefault();
-
-    const primeiraCarta = pessoa.cartas[0];
-
-    if (!primeiraCarta) return;
-
-    setTimeout(() => {
-      cartaNomeRefs.current[
-        primeiraCarta.id
-      ]?.focus();
-    }, 30);
-  }
-
-  function handleEnterNomeCarta(event, cartaId) {
-    if (event.key !== "Enter") return;
-
-    event.preventDefault();
-
-    setTimeout(() => {
-      cartaValorRefs.current[
-        cartaId
-      ]?.focus();
-    }, 30);
-  }
-
-  function handleEnterValor(
-    event,
-    pessoaId,
-    carta
-  ) {
-    if (event.key !== "Enter") return;
-
-    event.preventDefault();
-
-    if (
-      !carta.nome.trim() ||
-      carta.valor === ""
-    ) {
-      return;
-    }
-
-    adicionarCarta(pessoaId);
-  }
-
   function limparLeilao() {
-    const confirmou = window.confirm(
-      "Deseja realmente limpar todo o leilão? Essa ação não pode ser desfeita."
-    );
-
-    if (!confirmou) return;
-
-    const novaPessoa = criarPessoa();
-
-    setPessoas([novaPessoa]);
-
-    setBusca("");
-    setOrdenacao("az");
-
-    setTimeout(() => {
-      pessoaNomeRefs.current[
-        novaPessoa.id
-      ]?.focus();
-    }, 50);
+    if (!window.confirm("Deseja realmente limpar todo o leilão? Essa ação não pode ser desfeita.")) return;
+    const primeira = criarCarta(); setCartas([primeira]); setBusca(""); setOrdenacao("entrada");
+    setTimeout(() => nomeRefs.current[primeira.id]?.focus(), 50);
   }
-
-  function desenharCabecalhoPDF(pdf) {
-    const larguraPagina = pdf.internal.pageSize.getWidth();
-
-    pdf.setFillColor(7, 12, 27);
-    pdf.rect(
-      0,
-      0,
-      larguraPagina,
-      42,
-      "F"
-    );
-
-    desenharPokebola(
-      pdf,
-      20,
-      21,
-      7
-    );
-
-    pdf.setTextColor(
-      255,
-      255,
-      255
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(18);
-
-    pdf.text(
-      "ORGANIZADOR DE LEILÃO",
-      31,
-      19
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdf.setFontSize(9);
-
-    pdf.setTextColor(
-      148,
-      163,
-      184
-    );
-
-    pdf.text(
-      "Pokémon",
-      31,
-      28
-    );
+  function completarComprador(cartaId, nome) {
+    atualizarCarta(cartaId, "comprador", nome);
+    setSugestaoAberta(null);
   }
-
-  function desenharRodape(
-    paginaAtual,
-    totalPaginas
-  ) {
-    const larguraPagina =
-      pdfAtual.internal.pageSize.getWidth();
-
-    const alturaPagina =
-      pdfAtual.internal.pageSize.getHeight();
-
-    pdfAtual.setDrawColor(
-      226,
-      232,
-      240
-    );
-
-    pdfAtual.line(
-      20,
-      alturaPagina - 20,
-      larguraPagina - 20,
-      alturaPagina - 20
-    );
-
-    pdfAtual.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdfAtual.setFontSize(8);
-
-    pdfAtual.setTextColor(
-      100,
-      116,
-      139
-    );
-
-    pdfAtual.text(
-      "Organizador de Leilão Pokémon",
-      20,
-      alturaPagina - 11
-    );
-
-    pdfAtual.text(
-      `Página ${paginaAtual} de ${totalPaginas}`,
-      larguraPagina - 20,
-      alturaPagina - 11,
-      {
-        align: "right",
-      }
-    );
-  }
-
-  let pdfAtual = null;
-
   function gerarPDF() {
-    const pessoasPDF = pessoas.filter(
-      (pessoa) =>
-        pessoa.nome.trim() ||
-        pessoa.cartas.some(
-          (carta) =>
-            carta.nome.trim() ||
-            carta.valor !== ""
-        )
-    );
+    const preenchidas = cartas.filter((c) => c.nome.trim() || c.valor !== "" || String(c.comprador).trim());
+    if (!preenchidas.length) { window.alert("Adicione pelo menos uma carta antes de gerar o PDF."); return; }
 
-    if (pessoasPDF.length === 0) {
-      window.alert(
-        "Adicione pelo menos uma pessoa ou uma carta antes de gerar o PDF."
-      );
+    const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const largura = pdf.internal.pageSize.getWidth();
+    const altura = pdf.internal.pageSize.getHeight();
+    const margem = 18;
+    const larguraConteudo = largura - margem * 2;
+    let y = 40;
 
-      return;
+    function cabecalho() {
+      // Uma única bolha azul-marinho escura contendo Pokébola, título, subtítulo e data.
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, largura, 34, "F");
+      pdf.setFillColor(5, 15, 38);
+      pdf.setDrawColor(5, 15, 38);
+      pdf.setLineWidth(0.4);
+      pdf.roundedRect(10, 5, largura - 20, 24, 3, 3, "FD");
+      // Desenho original da Pokébola, restaurado sem alterações.
+      desenharPokebola(pdf, 21, 17, 7);
+      pdf.setTextColor(255, 255, 255); pdf.setFont("helvetica", "bold"); pdf.setFontSize(16); pdf.text("ORGANIZADOR DE LEILÃO", 34, 15.5);
+      pdf.setFont("helvetica", "normal"); pdf.setFontSize(9); pdf.setTextColor(203, 213, 225); pdf.text("Pokémon · Registro dos arremates", 34, 22.5);
+      pdf.setFont("helvetica", "bold"); pdf.setFontSize(8.5); pdf.setTextColor(255, 255, 255);
+      pdf.text(`DATA DO LEILÃO  ${new Date().toLocaleDateString("pt-BR")}`, largura - 15, 18, { align: "right" });
     }
 
-    const pdf = new jsPDF({
-      orientation: "portrait",
-      unit: "mm",
-      format: "a4",
+    function novaPagina() {
+      pdf.addPage();
+      cabecalho();
+      y = 40;
+    }
+
+    function rodape() {
+      const totalPaginas = pdf.getNumberOfPages();
+      for (let i = 1; i <= totalPaginas; i++) {
+        pdf.setPage(i);
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.3);
+        pdf.line(margem, altura - 16, largura - margem, altura - 16);
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(100, 116, 139);
+        pdf.text("Organizador de Leilão Pokémon", margem, altura - 9);
+        pdf.text(`Página ${i} de ${totalPaginas}`, largura - margem, altura - 9, { align: "right" });
+      }
+    }
+
+    cabecalho();
+    y = 40;
+
+    const grupos = new Map();
+    preenchidas.forEach((carta) => {
+      const nome = String(carta.comprador || "").trim();
+      const chave = normalizarNome(nome);
+      const nomeGrupo = nome ? (/^\d+$/.test(nome) ? compradorPorToken.get(nome) || `Comprador ${nome}` : nome) : "Sem arrematante informado";
+      const token = nome ? obterToken(nome) : null;
+      const idGrupo = chave && !/^\d+$/.test(nome) ? chave : nome ? `token-${nome}` : "sem-comprador";
+      if (!grupos.has(idGrupo)) grupos.set(idGrupo, { nome: nomeGrupo, token, cartas: [], total: 0 });
+      const grupo = grupos.get(idGrupo);
+      grupo.cartas.push(carta);
+      grupo.total += numeroValor(carta.valor);
     });
 
-    pdfAtual = pdf;
+    grupos.forEach((grupo) => {
+      // Pequeno espaço entre compradores, mantendo os blocos alinhados e organizados.
+      y += 3.5;
+      if (y + 32 > altura - 23) novaPagina();
+      const titulo = grupo.token ? `#${grupo.token}  ${grupo.nome}` : grupo.nome;
+      const tituloLinhas = pdf.splitTextToSize(titulo, larguraConteudo - 8);
+      const alturaBolhaNome = Math.max(10, tituloLinhas.length * 4.5 + 4);
+      // Nome do arrematante dentro de uma bolha cinza-escura, alinhada aos cartões.
+      pdf.setFillColor(71, 85, 105);
+      pdf.roundedRect(margem, y, larguraConteudo, alturaBolhaNome, 1.8, 1.8, "F");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.setTextColor(255, 255, 255);
+      pdf.text(tituloLinhas, margem + 4, y + 6.2);
+      y += alturaBolhaNome + 3;
 
-    const larguraPagina =
-      pdf.internal.pageSize.getWidth();
+      grupo.cartas.forEach((carta, indice) => {
+        const nomeCarta = carta.nome.trim() || "Carta sem nome";
+        const linhasNome = pdf.splitTextToSize(nomeCarta, larguraConteudo - 35);
+        const alturaLinha = Math.max(7, linhasNome.length * 4.5 + 2);
+        if (y + alturaLinha + 16 > altura - 20) novaPagina();
 
-    const alturaPagina =
-      pdf.internal.pageSize.getHeight();
+        // Cada carta fica em um cartão cinza-claro; o restante da página permanece branco.
+        pdf.setFillColor(241, 245, 249);
+        pdf.roundedRect(margem, y, larguraConteudo, alturaLinha, 1.5, 1.5, "F");
+        pdf.setDrawColor(226, 232, 240);
+        pdf.setLineWidth(0.25);
+        pdf.roundedRect(margem, y, larguraConteudo, alturaLinha, 1.5, 1.5, "S");
 
-    let y = 55;
-
-    desenharCabecalhoPDF(pdf);
-
-    // Resumo
-    pdf.setFillColor(
-      241,
-      245,
-      249
-    );
-
-    pdf.roundedRect(
-      20,
-      y,
-      larguraPagina - 40,
-      25,
-      4,
-      4,
-      "F"
-    );
-
-    pdf.setTextColor(
-      15,
-      23,
-      42
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "bold"
-    );
-
-    pdf.setFontSize(10);
-
-    pdf.text(
-      "RESUMO DO LEILÃO",
-      26,
-      y + 8
-    );
-
-    pdf.setFont(
-      "helvetica",
-      "normal"
-    );
-
-    pdf.setFontSize(8);
-
-    const dataAtual =
-      new Date().toLocaleDateString(
-        "pt-BR"
-      );
-
-    pdf.text(
-      `Data: ${dataAtual}`,
-      26,
-      y + 17
-    );
-
-    // ALTERAÇÃO SOMENTE NO PDF:
-    // Participantes -> Adquirentes
-    pdf.text(
-      `Adquirentes: ${pessoasPDF.length}`,
-      100,
-      y + 17
-    );
-
-    const quantidadeCartasPDF =
-      pessoasPDF.reduce(
-        (total, pessoa) =>
-          total + pessoa.cartas.length,
-        0
-      );
-
-    pdf.text(
-      `Cartas: ${quantidadeCartasPDF}`,
-      145,
-      y + 17
-    );
-
-    y += 40;
-
-    pessoasPDF.forEach(
-      (pessoa, indicePessoa) => {
-        const nomePessoa =
-          pessoa.nome.trim() ||
-          `Pessoa ${indicePessoa + 1}`;
-
-        const totalPessoa =
-          calcularTotalPessoa(pessoa);
-
-        const alturaBloco =
-          31 +
-          pessoa.cartas.length * 9 +
-          18;
-
-        if (
-          y + alturaBloco >
-          alturaPagina - 30
-        ) {
-          pdf.addPage();
-
-          desenharCabecalhoPDF(pdf);
-
-          y = 55;
-        }
-
-        // Cabeçalho da pessoa
-        pdf.setFillColor(
-          15,
-          30,
-          55
-        );
-
-        pdf.roundedRect(
-          20,
-          y,
-          larguraPagina - 40,
-          16,
-          3,
-          3,
-          "F"
-        );
-
-        pdf.setTextColor(
-          255,
-          255,
-          255
-        );
-
-        pdf.setFont(
-          "helvetica",
-          "bold"
-        );
-
+        pdf.setFont("helvetica", "normal");
         pdf.setFontSize(10);
+        pdf.setTextColor(51, 65, 85);
+        pdf.text(linhasNome, margem + 4, y + 4.8);
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10);
+        pdf.setTextColor(30, 41, 59);
+        pdf.text(moeda(numeroValor(carta.valor)), largura - margem - 4, y + 4.8, { align: "right" });
+        y += alturaLinha + 1.5;
+      });
 
-        pdf.text(
-          nomePessoa,
-          26,
-          y + 10
-        );
+      // O total aparece somente após a lista de cartas deste arrematante.
+      if (y + 15 > altura - 20) novaPagina();
+      y += 2;
+      // Fundo um pouco mais escuro para destacar o total sem perder o estilo limpo.
+      pdf.setFillColor(203, 213, 225);
+      pdf.roundedRect(margem, y, larguraConteudo, 12, 1.5, 1.5, "F");
+      pdf.setFillColor(51, 65, 85);
+      pdf.roundedRect(margem, y, 2.2, 12, 1, 1, "F");
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(11);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text("TOTAL", margem + 4, y + 7.6);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(12);
+      pdf.setTextColor(15, 23, 42);
+      pdf.text(moeda(grupo.total), largura - margem - 4, y + 7.6, { align: "right" });
+      y += 19;
+    });
 
-        // O valor ao lado do nome foi
-        // removido SOMENTE do PDF.
-
-        y += 20;
-
-        // Cabeçalho das cartas
-        pdf.setFillColor(
-          226,
-          232,
-          240
-        );
-
-        pdf.rect(
-          20,
-          y,
-          larguraPagina - 40,
-          8,
-          "F"
-        );
-
-        pdf.setTextColor(
-          71,
-          85,
-          105
-        );
-
-        pdf.setFont(
-          "helvetica",
-          "bold"
-        );
-
-        pdf.setFontSize(7);
-
-        pdf.text(
-          "CARTA",
-          26,
-          y + 5
-        );
-
-        pdf.text(
-          "VALOR",
-          larguraPagina - 26,
-          y + 5,
-          {
-            align: "right",
-          }
-        );
-
-        y += 8;
-
-        pessoa.cartas.forEach(
-          (carta, indiceCarta) => {
-            const nomeCarta =
-              carta.nome.trim() ||
-              `Carta ${indiceCarta + 1}`;
-
-            const valorCarta =
-              normalizarValor(
-                carta.valor
-              );
-
-            if (
-              indiceCarta % 2 === 0
-            ) {
-              pdf.setFillColor(
-                248,
-                250,
-                252
-              );
-
-              pdf.rect(
-                20,
-                y,
-                larguraPagina - 40,
-                9,
-                "F"
-              );
-            }
-
-            pdf.setTextColor(
-              30,
-              41,
-              59
-            );
-
-            pdf.setFont(
-              "helvetica",
-              "normal"
-            );
-
-            pdf.setFontSize(8);
-
-            pdf.text(
-              nomeCarta,
-              26,
-              y + 6
-            );
-
-            pdf.setFont(
-              "helvetica",
-              "bold"
-            );
-
-            pdf.text(
-              formatarMoeda(
-                valorCarta
-              ),
-              larguraPagina - 26,
-              y + 6,
-              {
-                align: "right",
-              }
-            );
-
-            y += 9;
-          }
-        );
-
-        // Total da pessoa
-        pdf.setDrawColor(
-          203,
-          213,
-          225
-        );
-
-        pdf.line(
-          20,
-          y + 1,
-          larguraPagina - 20,
-          y + 1
-        );
-
-        y += 8;
-
-        pdf.setTextColor(
-          15,
-          23,
-          42
-        );
-
-        pdf.setFont(
-          "helvetica",
-          "bold"
-        );
-
-        pdf.setFontSize(9);
-
-        pdf.text(
-          "TOTAL A PAGAR:",
-          20,
-          y
-        );
-
-        pdf.setTextColor(
-          37,
-          99,
-          235
-        );
-
-        pdf.text(
-          formatarMoeda(totalPessoa),
-          larguraPagina - 20,
-          y,
-          {
-            align: "right",
-          }
-        );
-
-        y += 18;
-      }
-    );
-
-    const totalPaginas =
-      pdf.getNumberOfPages();
-
-    for (
-      let pagina = 1;
-      pagina <= totalPaginas;
-      pagina++
-    ) {
-      pdf.setPage(pagina);
-
-      desenharRodape(
-        pagina,
-        totalPaginas
-      );
-    }
-
-    pdf.save(
-      "dividas-leilao-pokemon.pdf"
-    );
-
-    pdfAtual = null;
+    rodape();
+    pdf.save("organizador-leilao-pokemon.pdf");
   }
 
-  useEffect(() => {
-    function handleAtalho(event) {
-      if (
-        event.ctrlKey &&
-        event.key === "Enter"
-      ) {
-        event.preventDefault();
+  const cartasExibidas = useMemo(() => {
+    const termo = normalizarNome(busca);
+    let lista = cartas.map((carta, indice) => ({ ...carta, indiceOriginal: indice })).filter((c) => {
+      if (!termo) return true;
+      return [c.nome, c.comprador, String(obterToken(c.comprador) || "")].some((v) => normalizarNome(v).includes(termo));
+    });
+    if (ordenacao === "az") lista.sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    if (ordenacao === "za") lista.sort((a, b) => b.nome.localeCompare(a.nome, "pt-BR"));
+    if (ordenacao === "maior") lista.sort((a, b) => numeroValor(b.valor) - numeroValor(a.valor));
+    if (ordenacao === "menor") lista.sort((a, b) => numeroValor(a.valor) - numeroValor(b.valor));
+    return lista;
+  }, [cartas, busca, ordenacao, tokenPorNome]);
+  const totalLeilao = cartas.reduce((s, c) => s + numeroValor(c.valor), 0);
+  const cartasPreenchidas = cartas.filter((c) => c.nome.trim() || c.valor !== "").length;
+  const totalCompradores = compradores.length;
 
-        adicionarPessoa();
-      }
-    }
-
-    window.addEventListener(
-      "keydown",
-      handleAtalho
-    );
-
-    return () => {
-      window.removeEventListener(
-        "keydown",
-        handleAtalho
-      );
-    };
-  }, []);
-
-  const pessoasExibidas =
-    obterPessoasOrdenadas();
-
-  return (
-    <div className="app">
-      <header className="cabecalho">
-        <div className="marca">
-          <div className="pokebola-logo">
-            <span />
-          </div>
-
-          <div>
-            <h1>
-              Organizador de Leilão
-            </h1>
-
-            <p>Pokémon</p>
-          </div>
+  return <div className="app">
+    <header className="cabecalho">
+      <div className="marca"><div className="pokebola-logo" /><div><h1>Organizador de Leilão</h1><p>Pokémon · Controle de arremates</p></div></div>
+      <button className="btn-adicionar-pessoa" onClick={adicionarCarta}>＋ Nova carta</button>
+    </header>
+    <main className="conteudo">
+      <section className="resumo">
+        <article className="resumo-card destaque"><span>VALOR CADASTRADO</span><strong>{moeda(totalLeilao)}</strong><small>Soma dos preços das cartas</small></article>
+        <article className="resumo-card"><span>CARTAS CADASTRADAS</span><strong>{cartasPreenchidas}</strong><small>Cartas no leilão</small></article>
+        <article className="resumo-card"><span>ARREMATANTES</span><strong>{totalCompradores}</strong><small>Compradores identificados</small></article>
+        <article className="resumo-card"><span>ITENS NA LISTA</span><strong>{cartas.length}</strong><small>Linhas de cadastro</small></article>
+      </section>
+      <section className="painel-intro"><div><span className="eyebrow">CONTROLE DO LEILÃO</span><h2>Cartas e arrematantes</h2><p>Cadastre a carta, informe o preço e associe quem arrematou.</p></div><button className="btn-adicionar-carta-topo" onClick={adicionarCarta}>＋ Adicionar carta</button></section>
+      <section className="filtros"><label className="busca"><span>⌕</span><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="Pesquisar carta, arrematante ou token..." /></label><select value={ordenacao} onChange={(e) => setOrdenacao(e.target.value)}><option value="entrada">Ordem de cadastro</option><option value="az">Carta: A → Z</option><option value="za">Carta: Z → A</option><option value="maior">Maior preço</option><option value="menor">Menor preço</option></select></section>
+      <section className="cartas-painel">
+        <div className="cartas-painel-titulo"><div><h2>📋 Cartas cadastradas</h2><p>Use o nome do comprador na primeira carta e depois o token numérico nas próximas.</p></div><span className="contador-pill">{cartas.length} {cartas.length === 1 ? "item" : "itens"}</span></div>
+        <div className="cartas-cabecalho"><span>#</span><span>CARTA / COLEÇÃO</span><span>PREÇO (R$)</span><span>ARREMATANTE / TOKEN</span><span></span></div>
+        <div className="lista-cartas">
+          {cartasExibidas.map((carta) => {
+            const token = obterToken(carta.comprador);
+            const textoComprador = String(carta.comprador || "").trim();
+            const sugestoes = compradores.filter((c) => normalizarNome(c.nome).includes(normalizarNome(textoComprador)) && normalizarNome(textoComprador) && normalizarNome(c.nome) !== normalizarNome(textoComprador));
+            return <div className="carta-linha" key={carta.id}>
+              <span className="numero-carta">{carta.indiceOriginal + 1}</span>
+              <input ref={(el) => { nomeRefs.current[carta.id] = el; }} className="nome-carta" value={carta.nome} onChange={(e) => atualizarCarta(carta.id, "nome", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); valorRefs.current[carta.id]?.focus(); } }} placeholder="Ex.: Pikachu 12/34" aria-label="Nome da carta" />
+              <div className="preco-container"><span className="preco-simbolo">R$</span><input ref={(el) => { valorRefs.current[carta.id] = el; }} className="preco-input" value={formatarValorInput(carta.valor)} inputMode="decimal" onChange={(e) => atualizarCarta(carta.id, "valor", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); compradorRefs.current[carta.id]?.focus(); } }} placeholder="0,00" aria-label="Preço da carta" /></div>
+              <div className="comprador-campo"><input ref={(el) => { compradorRefs.current[carta.id] = el; }} value={carta.comprador} onFocus={() => setSugestaoAberta(carta.id)} onChange={(e) => { setSugestaoAberta(carta.id); atualizarCarta(carta.id, "comprador", e.target.value); }} onBlur={() => setTimeout(() => setSugestaoAberta((atual) => atual === carta.id ? null : atual), 150)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setSugestaoAberta(null); adicionarCarta(); } }} placeholder="Nome ou token (ex.: 1)" aria-label="Arrematante" />
+                {token && <span className="token-inline">#{token}</span>}
+                {sugestaoAberta === carta.id && sugestoes.length > 0 && <div className="sugestoes">{sugestoes.slice(0, 5).map((s) => <button type="button" key={s.token} onMouseDown={(e) => e.preventDefault()} onClick={() => completarComprador(carta.id, s.nome)}>#{s.token} · {s.nome}</button>)}</div>}
+              </div>
+              <button className="btn-remover-carta" onClick={() => removerCarta(carta.id)} title="Remover carta" aria-label="Remover carta">×</button>
+            </div>;
+          })}
         </div>
-
-        <button
-          className="btn-adicionar-pessoa"
-          onClick={adicionarPessoa}
-        >
-          + Nova pessoa
-        </button>
-      </header>
-
-      <main className="conteudo">
-        <section className="resumo">
-          <div className="resumo-card destaque">
-            <span>
-              💰 Total do leilão
-            </span>
-
-            <strong>
-              {formatarMoeda(totalGeral)}
-            </strong>
-          </div>
-
-          <div className="resumo-card">
-            <span>
-              👥 Participantes
-            </span>
-
-            <strong>
-              {pessoas.length}
-            </strong>
-          </div>
-
-          <div className="resumo-card">
-            <span>
-              📜 Cartas
-            </span>
-
-            <strong>
-              {totalCartas}
-            </strong>
-          </div>
-
-          <div className="resumo-card">
-            <span>
-              💵 Maior dívida
-            </span>
-
-            <strong>
-              {formatarMoeda(
-                maiorDivida
-                  ? calcularTotalPessoa(
-                      maiorDivida
-                    )
-                  : 0
-              )}
-            </strong>
-
-            <small>
-              {maiorDivida?.nome ||
-                "—"}
-            </small>
-          </div>
-        </section>
-
-        <section className="filtros">
-          <div className="busca">
-            <span>🔍</span>
-
-            <input
-              type="text"
-              placeholder="Pesquisar participante..."
-              value={busca}
-              onChange={(event) =>
-                setBusca(event.target.value)
-              }
-            />
-          </div>
-
-          <select
-            value={ordenacao}
-            onChange={(event) =>
-              setOrdenacao(event.target.value)
-            }
-          >
-            <option value="az">
-              A → Z
-            </option>
-
-            <option value="za">
-              Z → A
-            </option>
-
-            <option value="maior">
-              Maior dívida
-            </option>
-
-            <option value="menor">
-              Menor dívida
-            </option>
-          </select>
-        </section>
-
-        {pessoasExibidas.length === 0 ? (
-          <section className="vazio">
-            <div>🔍</div>
-
-            <h2>
-              Nenhuma pessoa encontrada
-            </h2>
-
-            <p>
-              Tente pesquisar por outro nome.
-            </p>
-          </section>
-        ) : (
-          <section className="lista-pessoas">
-            {pessoasExibidas.map(
-              (pessoa, indicePessoa) => {
-                const totalPessoa =
-                  calcularTotalPessoa(
-                    pessoa
-                  );
-
-                return (
-                  <article
-                    className="pessoa-card"
-                    key={pessoa.id}
-                  >
-                    <div className="pessoa-header">
-                      <div className="pessoa-identidade">
-                        <span className="numero-pessoa">
-                          {String(
-                            indicePessoa + 1
-                          ).padStart(2, "0")}
-                        </span>
-
-                        <input
-                          ref={(elemento) => {
-                            pessoaNomeRefs.current[
-                              pessoa.id
-                            ] = elemento;
-                          }}
-                          className="nome-pessoa"
-                          type="text"
-                          value={pessoa.nome}
-                          placeholder="Nome da pessoa"
-                          onChange={(event) =>
-                            atualizarNomePessoa(
-                              pessoa.id,
-                              event.target.value
-                            )
-                          }
-                          onKeyDown={(event) =>
-                            handleEnterPessoa(
-                              event,
-                              pessoa
-                            )
-                          }
-                        />
-                      </div>
-
-                      <div className="pessoa-total">
-                        <span>
-                          Total a pagar
-                        </span>
-
-                        <strong>
-                          {formatarMoeda(
-                            totalPessoa
-                          )}
-                        </strong>
-                      </div>
-
-                      <button
-                        className="btn-remover-pessoa"
-                        onClick={() =>
-                          removerPessoa(
-                            pessoa.id
-                          )
-                        }
-                        title="Remover pessoa"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-
-                    <div className="cartas-area">
-                      <div className="cartas-titulo">
-                        <span>
-                          📜 CARTAS
-                        </span>
-
-                        <small>
-                          {pessoa.cartas.length}{" "}
-                          {pessoa.cartas.length ===
-                          1
-                            ? "CARTA"
-                            : "CARTAS"}
-                        </small>
-                      </div>
-
-                      <div className="lista-cartas">
-                        {pessoa.cartas.map(
-                          (
-                            carta,
-                            indiceCarta
-                          ) => (
-                            <div
-                              className="carta-linha"
-                              key={carta.id}
-                            >
-                              <span className="numero-carta">
-                                {indiceCarta + 1}
-                              </span>
-
-                              <input
-                                ref={(elemento) => {
-                                  cartaNomeRefs.current[
-                                    carta.id
-                                  ] = elemento;
-                                }}
-                                className="nome-carta"
-                                type="text"
-                                value={carta.nome}
-                                placeholder="Nome da carta"
-                                onChange={(
-                                  event
-                                ) =>
-                                  atualizarNomeCarta(
-                                    pessoa.id,
-                                    carta.id,
-                                    event.target
-                                      .value
-                                  )
-                                }
-                                onKeyDown={(
-                                  event
-                                ) =>
-                                  handleEnterNomeCarta(
-                                    event,
-                                    carta.id
-                                  )
-                                }
-                              />
-
-                              <div className="preco-container">
-                                <span className="preco-simbolo">
-                                  R$
-                                </span>
-
-                                <input
-                                  ref={(elemento) => {
-                                    cartaValorRefs.current[
-                                      carta.id
-                                    ] = elemento;
-                                  }}
-                                  className="preco-input"
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={formatarValorInput(
-                                    carta.valor
-                                  )}
-                                  placeholder="0,00"
-                                  onChange={(
-                                    event
-                                  ) =>
-                                    atualizarValorCarta(
-                                      pessoa.id,
-                                      carta.id,
-                                      event.target
-                                        .value
-                                    )
-                                  }
-                                  onKeyDown={(
-                                    event
-                                  ) =>
-                                    handleEnterValor(
-                                      event,
-                                      pessoa.id,
-                                      carta
-                                    )
-                                  }
-                                />
-                              </div>
-
-                              <button
-                                className="btn-remover-carta"
-                                onClick={() =>
-                                  removerCarta(
-                                    pessoa.id,
-                                    carta.id
-                                  )
-                                }
-                                title="Remover carta"
-                              >
-                                ×
-                              </button>
-                            </div>
-                          )
-                        )}
-                      </div>
-
-                      <button
-                        className="btn-adicionar-carta"
-                        onClick={() =>
-                          adicionarCarta(
-                            pessoa.id
-                          )
-                        }
-                      >
-                        + Adicionar outra carta
-                      </button>
-                    </div>
-                  </article>
-                );
-              }
-            )}
-          </section>
-        )}
-
-        <section className="acoes-rodape">
-          <div className="botoes-principais">
-            <button
-              className="btn-pdf"
-              onClick={gerarPDF}
-            >
-              📄 Gerar PDF
-            </button>
-
-            <button
-              className="btn-limpar"
-              onClick={limparLeilao}
-            >
-              🗑️ Limpar leilão
-            </button>
-          </div>
-
-          <div className="status">
-            {salvo
-              ? "💾 Dados salvos automaticamente neste navegador"
-              : "⚠️ Não foi possível salvar os dados"}
-          </div>
-
-          <div className="atalho">
-            Atalho:{" "}
-            <strong>
-              Ctrl + Enter
-            </strong>{" "}
-            adiciona participante
-          </div>
-        </section>
-      </main>
-
-      <footer className="rodape">
-        <span>
-          Organizador de Leilão Pokémon
-        </span>
-
-        <span>
-          Dados armazenados localmente neste navegador
-        </span>
-      </footer>
-    </div>
-  );
+        <button className="btn-adicionar-carta" onClick={adicionarCarta}>＋ Adicionar outra carta</button>
+      </section>
+      <section className="tokens-pessoas">
+        <div className="tokens-cabecalho"><div><span className="eyebrow">REFERÊNCIA RÁPIDA</span><h2>Números dos compradores</h2><p>Digite o nome uma vez. Nas próximas cartas, use o token correspondente.</p></div><span className="tokens-contagem">{compradores.length} {compradores.length === 1 ? "arrematante" : "arrematantes"}</span></div>
+        {compradores.length === 0 ? <p className="tokens-vazio">Os números serão criados automaticamente quando você informar um comprador.</p> : <div className="tokens-lista">{compradores.map((c) => <div className="token-item" key={c.token}><span className="token-badge">#{c.token}</span><div className="token-dados"><strong>{c.nome}</strong><small>{c.quantidade} {c.quantidade === 1 ? "carta" : "cartas"} · Total individual: {moeda(c.total)}</small></div><button className="token-usar" onClick={() => { const vazia = cartas.find((carta) => !carta.comprador.trim()); if (vazia) { compradorRefs.current[vazia.id]?.focus(); atualizarCarta(vazia.id, "comprador", c.nome); } else { const nova = criarCarta(); nova.comprador = c.nome; setCartas((atual) => [...atual, nova]); setTimeout(() => nomeRefs.current[nova.id]?.focus(), 50); } }}>Usar token</button></div>)}</div>}
+      </section>
+      <section className="acoes-rodape"><div className="botoes-principais"><button className="btn-pdf" onClick={gerarPDF}>▤ Gerar PDF</button><button className="btn-limpar" onClick={limparLeilao}>Limpar leilão</button></div><div className="status">{salvo ? "✓ Dados salvos automaticamente neste navegador" : "⚠ Não foi possível salvar os dados"}</div><div className="atalho">Dica: pressione <strong>Enter</strong> no campo do comprador para adicionar uma nova carta.</div></section>
+    </main>
+    <footer className="rodape"><span>Organizador de Leilão Pokémon</span><span>Dados armazenados localmente neste navegador</span></footer>
+  </div>;
 }
-
 export default App;
