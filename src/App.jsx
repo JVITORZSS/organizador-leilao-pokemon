@@ -125,10 +125,6 @@ function App() {
       if (partes.length > 2) novoValor = `${partes[0]},${partes.slice(1).join("")}`;
       if (partes[1]?.length > 2) novoValor = `${partes[0]},${partes[1].slice(0, 2)}`;
     }
-    if (campo === "comprador") {
-      const trimmed = String(valor).trim();
-      if (/^\d+$/.test(trimmed) && compradorPorToken.has(trimmed)) novoValor = compradorPorToken.get(trimmed);
-    }
     setCartas((atual) => atual.map((c) => c.id === id ? { ...c, [campo]: novoValor } : c));
   }
   function adicionarCarta() {
@@ -148,6 +144,14 @@ function App() {
   function completarComprador(cartaId, nome) {
     atualizarCarta(cartaId, "comprador", nome);
     setSugestaoAberta(null);
+  }
+  function resolverTokenComprador(cartaId) {
+    const carta = cartas.find((item) => item.id === cartaId);
+    const texto = String(carta?.comprador || "").trim();
+    if (/^\d+$/.test(texto) && compradorPorToken.has(texto)) {
+      atualizarCarta(cartaId, "comprador", compradorPorToken.get(texto));
+    }
+    setSugestaoAberta((atual) => atual === cartaId ? null : atual);
   }
   function gerarPDF() {
     const preenchidas = cartas.filter((c) => c.nome.trim() || c.valor !== "" || String(c.comprador).trim());
@@ -318,7 +322,7 @@ function App() {
               <span className="numero-carta">{carta.indiceOriginal + 1}</span>
               <input ref={(el) => { nomeRefs.current[carta.id] = el; }} className="nome-carta" value={carta.nome} onChange={(e) => atualizarCarta(carta.id, "nome", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); valorRefs.current[carta.id]?.focus(); } }} placeholder="Ex.: Pikachu 12/34" aria-label="Nome da carta" />
               <div className="preco-container"><span className="preco-simbolo">R$</span><input ref={(el) => { valorRefs.current[carta.id] = el; }} className="preco-input" value={formatarValorInput(carta.valor)} inputMode="decimal" onChange={(e) => atualizarCarta(carta.id, "valor", e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); compradorRefs.current[carta.id]?.focus(); } }} placeholder="0,00" aria-label="Preço da carta" /></div>
-              <div className="comprador-campo"><input ref={(el) => { compradorRefs.current[carta.id] = el; }} value={carta.comprador} onFocus={() => setSugestaoAberta(carta.id)} onChange={(e) => { setSugestaoAberta(carta.id); atualizarCarta(carta.id, "comprador", e.target.value); }} onBlur={() => setTimeout(() => setSugestaoAberta((atual) => atual === carta.id ? null : atual), 150)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); setSugestaoAberta(null); adicionarCarta(); } }} placeholder="Nome ou token (ex.: 1)" aria-label="Arrematante" />
+              <div className="comprador-campo"><input ref={(el) => { compradorRefs.current[carta.id] = el; }} value={carta.comprador} onFocus={() => setSugestaoAberta(carta.id)} onChange={(e) => { setSugestaoAberta(carta.id); atualizarCarta(carta.id, "comprador", e.target.value); }} onBlur={() => setTimeout(() => resolverTokenComprador(carta.id), 150)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); resolverTokenComprador(carta.id); adicionarCarta(); } }} placeholder="Nome ou token (ex.: 1)" aria-label="Arrematante" />
                 {token && <span className="token-inline">#{token}</span>}
                 {sugestaoAberta === carta.id && sugestoes.length > 0 && <div className="sugestoes">{sugestoes.slice(0, 5).map((s) => <button type="button" key={s.token} onMouseDown={(e) => e.preventDefault()} onClick={() => completarComprador(carta.id, s.nome)}>#{s.token} · {s.nome}</button>)}</div>}
               </div>
